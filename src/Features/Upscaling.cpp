@@ -13,6 +13,7 @@
 #include "Upscaling/FoveatedRender/Core.h"
 #include "Upscaling/FoveatedRender/Postprocess.h"
 #include "Upscaling/FoveatedRender/Preprocess.h"
+#include "Upscaling/NeuralRendering/Integration.h"
 #include "Upscaling/PerfMode.h"
 #include "Upscaling/Streamline.h"
 #include "Utils/DevBenchUx.h"
@@ -899,6 +900,8 @@ void Upscaling::DrawSettings()
 	// one settings panel; also mirrored in the Performance hub.
 	if (globals::game::isVR)
 		DrawFoveationControls();
+	else if (upscaleMethod == UpscaleMethod::kDLSS)
+		foveatedRender.DrawSettings();
 
 	if (ImGui::TreeNodeEx(T(TKEY("backend_diagnostics"), "Backend Diagnostics"))) {
 		// Streamline log level selection
@@ -3255,6 +3258,11 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	// Restore kFRAMEBUFFER after ISHDR — hdrTexture now has the HDR scene
 	if (hdrLoaded)
 		globals::features::hdrDisplay.RestoreFramebuffer();
+
+	// Flat SDR reaches its final tonemapped scene in kFRAMEBUFFER when the
+	// engine Post chain returns. Run NR here, before DrawInterfaceStart adds UI.
+	if (!globals::game::isVR)
+		NeuralRendering::ApplyFoveatedLdr();
 
 	Util::SetTemporal(false);
 }
