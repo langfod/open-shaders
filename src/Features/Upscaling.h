@@ -4,6 +4,7 @@
 #include "Upscaling/DX12SwapChain.h"
 #include "Upscaling/FidelityFX.h"
 #include "Upscaling/FoveatedRender.h"
+#include "Upscaling/NeuralRendering/Settings.h"
 #include "Upscaling/PerfMode.h"
 #include "Upscaling/RCAS/RCAS.h"
 #include "Upscaling/Streamline.h"
@@ -125,6 +126,11 @@ public:
 
 	Settings settings;
 
+	// Neural Rendering drives both the flat and VR routes, so it is owned here rather
+	// than by FoveatedRender. Kept out of Settings so it round-trips as its own JSON
+	// block and none of its fields land in kRestartFields (all are runtime-effective).
+	NeuralRendering::Settings neuralRendering;
+
 	// Single source of truth for restart-gated fields. Order is not load-bearing
 	// — the call-site `DrawSettingDiff` invocations in DrawSettings() handle any
 	// per-field conditional gating (e.g., qualityMode/upscaleMethod banners only
@@ -192,10 +198,6 @@ public:
 	// FG FPS Measurement for Overlay
 	bool IsFrameGenerationDx12PathActive() const;
 	bool IsFrameGenerationActive() const;
-	bool IsFrameGenerationConfiguredForSession() const
-	{
-		return IsFrameGenerationDx12PathActive() && settings.frameGenerationMode != 0;
-	}
 	bool ShouldUseFrameGenerationThisFrame() const;
 	bool IsUpscalingActive() const;
 
@@ -253,6 +255,9 @@ public:
 	/// panel and the Performance hub. VR-only; self-gates via IsRuntimeSupported()
 	/// (shown disabled off-VR rather than hidden).
 	void DrawFoveationControls(bool showTuning = true);
+	/// @brief Renders the DLSS Neural Rendering enable + tuning tree. Shown on both
+	/// Flat and VR; self-gates on DLSS (plus Foveated Default + PerfMode in VR).
+	void DrawNeuralRenderingControls();
 	const char* GetQualityModeName(uint qualityMode) const;
 	virtual void SaveSettings(json& o_json) override;
 	virtual void LoadSettings(json& o_json) override;

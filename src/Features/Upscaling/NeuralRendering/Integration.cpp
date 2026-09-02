@@ -1,28 +1,32 @@
 #include "Integration.h"
 
 #include "Renderer.h"
-#include "Features/HDRDisplay.h"
+#include "Settings.h"
 #include "Features/Upscaling.h"
 #include "Features/Upscaling/FoveatedRender/Bridge.h"
 #include "Features/Upscaling/FoveatedRender/Core.h"
 #include "Globals.h"
 #include "GpuPass.h"
+#include "Utils/LazyShader.h"
 
 #include <array>
+#include <utility>
+#include <vector>
 
 namespace NeuralRendering
 {
 	namespace
 	{
 		eastl::unique_ptr<Texture2D> color[2];
+		eastl::unique_ptr<Texture2D> colorWork;
+		Util::LazyShader<ID3D11ComputeShader> hdrRangeCompressCS;
+		Util::LazyShader<ID3D11ComputeShader> hdrRangeExpandCS;
 		std::uint32_t colorWidth = 0;
 		std::uint32_t colorHeight = 0;
 		DXGI_FORMAT colorFormat = DXGI_FORMAT_UNKNOWN;
 		std::uint32_t lastAppliedFrame = UINT32_MAX;
 		bool writebackLogged = false;
 		bool flatRouteWasActive = false;
-		bool flatFrameGenerationBlockLogged = false;
-		bool flatHdrBlockLogged = false;
 
 		ID3D11Texture2D* ResolveRenderTargetTexture(
 			const RE::BSGraphics::RenderTargetData& target,
@@ -42,6 +46,41 @@ namespace NeuralRendering
 			if (auto* texture = resolveView(target.SRV))
 				return texture;
 			return resolveView(target.RTV);
+		}
+
+		/// <summary>True when kFRAMEBUFFER is the HDR float target, whose highlights run past 1.0.</summary>
+		bool NeedsHdrRangeMapping()
+		{
+			return colorFormat == DXGI_FORMAT_R16G16B16A16_FLOAT ||
+			       colorFormat == DXGI_FORMAT_R32G32B32A32_FLOAT ||
+			       colorFormat == DXGI_FORMAT_R11G11B10_FLOAT;
+		}
+
+		/// <summary>Runs one direction of the reversible highlight compression that keeps
+		/// out-of-range HDR values away from Feature 18. Returns false if the shader is
+		/// unavailable, which leaves the framebuffer untouched.</summary>
+		bool DispatchHdrRangeMap(ID3D11DeviceContext* context, bool inverse, ID3D11ShaderResourceView* source,
+			ID3D11UnorderedAccessView* destination, std::uint32_t width, std::uint32_t height)
+		{
+			std::vector<std::pair<const char*, const char*>> defines;
+			if (inverse)
+				defines.emplace_back("INVERSE", "");
+			auto& lazyShader = inverse ? hdrRangeExpandCS : hdrRangeCompressCS;
+			auto* shader = lazyShader.Get(L"Data\\Shaders\\Upscaling\\NeuralRendering\\HdrRangeMapCS.hlsl",
+				defines, "cs_5_0", "main",
+				inverse ? "NeuralRendering::HdrRangeExpandCS" : "NeuralRendering::HdrRangeCompressCS");
+			if (!shader || !source || !destination)
+				return false;
+			context->CSSetShader(shader, nullptr, 0);
+			context->CSSetShaderResources(0, 1, &source);
+			context->CSSetUnorderedAccessViews(0, 1, &destination, nullptr);
+			context->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+			ID3D11ShaderResourceView* nullSRV = nullptr;
+			ID3D11UnorderedAccessView* nullUAV = nullptr;
+			context->CSSetShaderResources(0, 1, &nullSRV);
+			context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+			context->CSSetShader(nullptr, nullptr, 0);
+			return true;
 		}
 
 		bool EnsureColorResources(ID3D11Resource* source, std::uint32_t width, std::uint32_t height)
@@ -65,27 +104,33 @@ namespace NeuralRendering
 			colorWidth = width;
 			colorHeight = height;
 			colorFormat = sourceDesc.Format;
+			// The range map reads and writes distinct resources, so the round trip needs a
+			// second staging surface. It only exists while the HDR framebuffer is in play.
+			colorWork.reset();
+			if (NeedsHdrRangeMapping()) {
+				colorWork = Upscaling::CreateTextureFromSource(source, width, height, false, true, true,
+					"NeuralRendering::HdrRangeWork");
+				if (!colorWork)
+					return false;
+			}
 			return true;
 		}
 
-		Tuning GetTuning(const FoveatedRender::Settings& settings)
+		Tuning GetTuning(const Settings& settings)
 		{
 			return {
-				settings.neuralRenderingIntensity,
-				settings.neuralRenderingLocalTone,
-				settings.neuralRenderingLocalStructure,
-				settings.neuralRenderingSkinStructure,
-				settings.neuralRenderingStyle,
-				settings.neuralRenderingAutoMask,
-				settings.neuralRenderingUICorrection,
+				settings.intensity,
+				settings.localTone,
+				settings.localStructure,
+				settings.skinStructure,
+				settings.style,
+				settings.autoMask,
+				settings.uiCorrection,
 			};
 		}
 
-		bool ApplyFlatLdr(Upscaling& upscaling, FoveatedRender& foveated)
+		bool ApplyFlatLdr(Upscaling& upscaling)
 		{
-			const bool frameGenerationConfigured = upscaling.IsFrameGenerationConfiguredForSession();
-			const bool hdrConfigured = globals::features::hdrDisplay.loaded &&
-				globals::features::hdrDisplay.settings.enableHDR;
 			auto* renderer = globals::game::renderer;
 			winrt::com_ptr<ID3D11Texture2D> framebufferHolder;
 			ID3D11Texture2D* framebuffer = nullptr;
@@ -94,16 +139,8 @@ namespace NeuralRendering
 				framebuffer = ResolveRenderTargetTexture(target, framebufferHolder);
 			}
 			const bool routeActive = upscaling.GetUpscaleMethod() == Upscaling::UpscaleMethod::kDLSS &&
-				foveated.settings.neuralRenderingEnabled && !frameGenerationConfigured && !hdrConfigured;
+				upscaling.neuralRendering.enabled;
 			if (!routeActive) {
-				if (foveated.settings.neuralRenderingEnabled && frameGenerationConfigured && !flatFrameGenerationBlockLogged) {
-					logger::warn("[DLSSNR] Flat route blocked: disable Frame Generation and restart the game");
-					flatFrameGenerationBlockLogged = true;
-				}
-				if (foveated.settings.neuralRenderingEnabled && hdrConfigured && !flatHdrBlockLogged) {
-					logger::warn("[DLSSNR] Flat route blocked: HDR Display is not supported by the LDR integration");
-					flatHdrBlockLogged = true;
-				}
 				if (flatRouteWasActive)
 					Reset();
 				return false;
@@ -133,19 +170,40 @@ namespace NeuralRendering
 			ID3D11DepthStencilView* savedDSV = nullptr;
 			context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
 			context->OMSetRenderTargets(0, nullptr, nullptr);
-			context->CopyResource(color[0]->resource.get(), framebuffer);
 
-			const bool succeeded = Renderer::Instance().Apply(globals::d3d::device, context, 0,
-				color[0]->resource.get(), depth.texture, depth.depthSRV,
-				upscaling.motionVectorCopyTexture->resource.get(), motionDesc.Width, motionDesc.Height,
-				totalDesc.Width, totalDesc.Height, static_cast<float>(motionDesc.Width),
-				static_cast<float>(motionDesc.Height), GetTuning(foveated.settings));
+			const bool rangeMapped = colorWork != nullptr;
+			bool succeeded = true;
+			if (rangeMapped) {
+				context->CopyResource(colorWork->resource.get(), framebuffer);
+				succeeded = DispatchHdrRangeMap(context, false, colorWork->srv.get(), color[0]->uav.get(),
+					totalDesc.Width, totalDesc.Height);
+			} else {
+				context->CopyResource(color[0]->resource.get(), framebuffer);
+			}
+
+			if (succeeded)
+				succeeded = Renderer::Instance().Apply(globals::d3d::device, context, 0,
+					color[0]->resource.get(), depth.texture, depth.depthSRV,
+					upscaling.motionVectorCopyTexture->resource.get(), motionDesc.Width, motionDesc.Height,
+					totalDesc.Width, totalDesc.Height, static_cast<float>(motionDesc.Width),
+					static_cast<float>(motionDesc.Height), GetTuning(upscaling.neuralRendering));
+
 			if (succeeded) {
-				context->CopyResource(framebuffer, color[0]->resource.get());
+				if (rangeMapped) {
+					succeeded = DispatchHdrRangeMap(context, true, color[0]->srv.get(), colorWork->uav.get(),
+						totalDesc.Width, totalDesc.Height);
+					if (succeeded)
+						context->CopyResource(framebuffer, colorWork->resource.get());
+				} else {
+					context->CopyResource(framebuffer, color[0]->resource.get());
+				}
+			}
+
+			if (succeeded) {
 				lastAppliedFrame = frame;
 				if (!writebackLogged) {
-					logger::info("[DLSSNR] Flat LDR kFRAMEBUFFER output written before UI guides={}x{} color={}x{}",
-						motionDesc.Width, motionDesc.Height, totalDesc.Width, totalDesc.Height);
+					logger::info("[DLSSNR] Flat LDR kFRAMEBUFFER output written before UI guides={}x{} color={}x{} rangeMapped={}",
+						motionDesc.Width, motionDesc.Height, totalDesc.Width, totalDesc.Height, rangeMapped);
 					writebackLogged = true;
 				}
 			}
@@ -158,16 +216,16 @@ namespace NeuralRendering
 		}
 	}
 
-	bool ApplyFoveatedLdr()
+	bool ApplyBeforeUI()
 	{
 		auto& upscaling = globals::features::upscaling;
 		auto& foveated = upscaling.foveatedRender;
 		if (!globals::game::isVR)
-			return ApplyFlatLdr(upscaling, foveated);
+			return ApplyFlatLdr(upscaling);
 		if (!globals::game::isVR || !FoveatedRenderImpl::Bridge::IsRouteActive() ||
 			upscaling.GetUpscaleMethod() != Upscaling::UpscaleMethod::kDLSS ||
 			foveated.GetDlssMode() != FoveatedRender::DlssMode::kDefault ||
-			!foveated.settings.neuralRenderingEnabled || upscaling.IsFrameGenerationActive())
+			!upscaling.neuralRendering.enabled)
 			return false;
 
 		const std::uint32_t frame = globals::state ? globals::state->frameCount : 0;
@@ -222,7 +280,7 @@ namespace NeuralRendering
 		}
 		const bool succeeded = Renderer::Instance().ApplyStereo(globals::d3d::device, context,
 			total.texture, inputs, FoveatedRenderImpl::Core::vrSubrectInW, FoveatedRenderImpl::Core::vrSubrectInH,
-			outWidth, outHeight, GetTuning(foveated.settings));
+			outWidth, outHeight, GetTuning(upscaling.neuralRendering));
 		if (succeeded) {
 			lastAppliedFrame = frame;
 			if (!writebackLogged) {
@@ -243,12 +301,13 @@ namespace NeuralRendering
 		Renderer::Instance().Reset();
 		color[0].reset();
 		color[1].reset();
+		colorWork.reset();
+		hdrRangeCompressCS.Reset();
+		hdrRangeExpandCS.Reset();
 		colorWidth = colorHeight = 0;
 		colorFormat = DXGI_FORMAT_UNKNOWN;
 		lastAppliedFrame = UINT32_MAX;
 		writebackLogged = false;
 		flatRouteWasActive = false;
-		flatFrameGenerationBlockLogged = false;
-		flatHdrBlockLogged = false;
 	}
 }

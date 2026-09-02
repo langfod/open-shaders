@@ -1,10 +1,12 @@
 #include "Renderer.h"
 
 #include "D3D12Interop.h"
+#include "Features/Upscaling.h"
 #include "GpuPass.h"
 #include "Utils/LazyShader.h"
 
 #include <array>
+#include <format>
 #include <utility>
 
 #include <d3d11.h>
@@ -76,7 +78,7 @@ namespace NeuralRendering
 			if (Runtime::Instance().Status() != RuntimeStatus::Initialized && !InitializeRuntime())
 				return false;
 			if (!EnsureResources(eyeIndex, color, depth, motionVectors, guideWidth, guideHeight, colorWidth, colorHeight))
-				return LatchFailure("shared resource creation", interop.LastError());
+				return LatchInteropFailure("shared resource creation");
 
 			auto& eye = eyes[eyeIndex];
 			context->CopyResource(eye.color.resource11.Get(), color);
@@ -86,7 +88,7 @@ namespace NeuralRendering
 
 			ID3D12GraphicsCommandList* commandList = nullptr;
 			if (!interop.BeginD3D12(&commandList))
-				return LatchFailure("BeginD3D12", interop.LastError());
+				return LatchInteropFailure("BeginD3D12");
 			D3D12_RESOURCE_BARRIER barriers[4]{};
 			ID3D12Resource* resources[4]{
 				eye.color.resource12.Get(), eye.depth.resource12.Get(),
@@ -109,7 +111,7 @@ namespace NeuralRendering
 				std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
 			commandList->ResourceBarrier(static_cast<UINT>(std::size(barriers)), barriers);
 			if (!interop.EndD3D12())
-				return LatchFailure("EndD3D12", interop.LastError());
+				return LatchInteropFailure("EndD3D12");
 			if (!succeeded)
 				return LatchFailure("Feature 18", static_cast<HRESULT>(Runtime::Instance().NgxResult()));
 
@@ -141,7 +143,7 @@ namespace NeuralRendering
 					return false;
 				if (!EnsureResources(eyeIndex, color, input.depth, input.motionVectors,
 						guideWidth, guideHeight, colorWidth, colorHeight))
-					return LatchFailure("shared resource creation", interop.LastError());
+					return LatchInteropFailure("shared resource creation");
 
 				D3D11_BOX sourceBox{
 					input.sourceX, input.sourceY, 0,
@@ -156,7 +158,7 @@ namespace NeuralRendering
 
 			ID3D12GraphicsCommandList* commandList = nullptr;
 			if (!interop.BeginD3D12(&commandList))
-				return LatchFailure("BeginD3D12 stereo", interop.LastError());
+				return LatchInteropFailure("BeginD3D12 stereo");
 
 			bool succeeded = true;
 			for (std::uint32_t eyeIndex = 0; eyeIndex < inputs.size(); ++eyeIndex) {
@@ -190,7 +192,7 @@ namespace NeuralRendering
 			}
 
 			if (!interop.EndD3D12())
-				return LatchFailure("EndD3D12 stereo", interop.LastError());
+				return LatchInteropFailure("EndD3D12 stereo");
 			if (!succeeded)
 				return LatchFailure("Feature 18 stereo", static_cast<HRESULT>(Runtime::Instance().NgxResult()));
 
@@ -251,8 +253,15 @@ namespace NeuralRendering
 			Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
 			HRESULT result = device->QueryInterface(IID_PPV_ARGS(&dxgiDevice));
 			if (SUCCEEDED(result)) result = dxgiDevice->GetAdapter(&adapter);
-			if (FAILED(result) || !interop.Initialize(adapter.Get(), device, context))
-				return LatchFailure("D3D12 interop initialization", FAILED(result) ? result : interop.LastError());
+			if (FAILED(result))
+				return LatchFailure("D3D12 interop adapter lookup", result);
+			// Both are null until the DLSS-G swapchain stands them up. Sharing the device
+			// keeps neural rendering and frame generation on a single NGX session, and the
+			// captured immediate context predates any third-party context wrapper.
+			auto* frameGenerationDevice = Upscaling::dx12SwapChain.d3d12Device.get();
+			auto* frameGenerationContext = Upscaling::dx12SwapChain.d3d11Context.get();
+			if (!interop.Initialize(adapter.Get(), device, context, frameGenerationDevice, frameGenerationContext))
+				return LatchInteropFailure("D3D12 interop initialization");
 			return true;
 		}
 
@@ -298,6 +307,12 @@ namespace NeuralRendering
 			resetPending = { true, true };
 			logger::info("[DLSSNR] resources eye={} guides={}x{} color={}x{}", eyeIndex, guideWidth, guideHeight, colorWidth, colorHeight);
 			return true;
+		}
+
+		/// <summary>Latches an interop failure, naming the D3D call that actually rejected us.</summary>
+		bool LatchInteropFailure(const char* operation)
+		{
+			return LatchFailure(std::format("{} [{}]", operation, interop.LastOperation()).c_str(), interop.LastError());
 		}
 
 		bool LatchFailure(const char* operation, HRESULT error)

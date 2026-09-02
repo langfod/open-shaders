@@ -87,15 +87,6 @@ struct FoveatedRender
 		uint subrectBlendMode = static_cast<uint>(SubrectBlendMode::kHardCopy);
 		float subrectFeatherWidth = 64.0f;
 		float subrectDitherStrength = 1.0f;
-		bool neuralRenderingEnabled = false;
-		uint neuralRenderingPreset = 3;
-		float neuralRenderingIntensity = 0.8f;
-		float neuralRenderingLocalTone = 0.75f;
-		float neuralRenderingLocalStructure = 0.9f;
-		float neuralRenderingSkinStructure = 0.9f;
-		uint neuralRenderingStyle = 3;
-		bool neuralRenderingAutoMask = true;
-		bool neuralRenderingUICorrection = false;
 	};
 
 	inline static constexpr Util::Settings::RestartTable<Settings, 1> kRestartFields{ {
