@@ -40,18 +40,18 @@ function(download_ffx_runtime _filename _sha256)
 endfunction()
 
 set(FFX_RUNTIME_FILES "")
-download_ffx_runtime(
-    amd_fidelityfx_framegeneration_dx12.dll
-    02297BEEDD285E822D3A64F314CF00FAF378DCEC0EDC47FF0C4DD71B3A8C2F18
-)
-download_ffx_runtime(
-    amd_fidelityfx_loader_dx12.dll
-    E2D85AA05A9BD9ED8B38935FDF5199372CCA6F74C12015143BB6F945EE1608AA
-)
-download_ffx_runtime(
-    amd_fidelityfx_upscaler_dx12.dll
-    D0DCCCC74A43C44BA435B7A369B456E0970D8A4464E4BD683119B374F2C9FB46
-)
+#download_ffx_runtime(
+#    amd_fidelityfx_framegeneration_dx12.dll
+#    02297BEEDD285E822D3A64F314CF00FAF378DCEC0EDC47FF0C4DD71B3A8C2F18
+#)
+#download_ffx_runtime(
+#    amd_fidelityfx_loader_dx12.dll
+#    E2D85AA05A9BD9ED8B38935FDF5199372CCA6F74C12015143BB6F945EE1608AA
+#)
+#download_ffx_runtime(
+#    amd_fidelityfx_upscaler_dx12.dll
+#    D0DCCCC74A43C44BA435B7A369B456E0970D8A4464E4BD683119B374F2C9FB46
+#)
 
 # XXX Temporarily disabling the registration of the FidelityFX runtime feature payload. XXX
 ##register_feature_payload(

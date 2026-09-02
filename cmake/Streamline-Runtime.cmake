@@ -132,13 +132,17 @@ function(stage_streamline_runtime _filename _directory _out_var)
     )
 endfunction()
 
+
+
+# XXX Temporarily disabling copying dll files for the DX12 runtime. XXX
+
 set(STREAMLINE_RUNTIME_FILES "")
-stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
 
 # XXX Temporarily disabling copying dll files. XXX
 #register_feature_payload(
@@ -149,16 +153,16 @@ stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAML
 
 # streamlineDX12 needs the same core plugins plus DLSS-G (frame generation).
 set(STREAMLINE_RUNTIME_DX12_FILES "")
-stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(nvngx_dlssg.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.dlss_g.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(nvngx_dlssg.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.dlss_g.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
 
-# XXX Temporarily disabling copying dll files for the DX12 runtime. XXX
+
 ##register_feature_payload(
 ##    Upscaling
 ##    FILES ${STREAMLINE_RUNTIME_DX12_FILES}
