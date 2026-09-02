@@ -53,8 +53,9 @@ download_ffx_runtime(
     D0DCCCC74A43C44BA435B7A369B456E0970D8A4464E4BD683119B374F2C9FB46
 )
 
-register_feature_payload(
-    Upscaling
-    FILES ${FFX_RUNTIME_FILES}
-    DESTINATION "${FFX_RUNTIME_RELATIVE_DIRECTORY}"
-)
+# XXX Temporarily disabling the registration of the FidelityFX runtime feature payload. XXX
+##register_feature_payload(
+#    Upscaling
+#    FILES ${FFX_RUNTIME_FILES}
+#    DESTINATION "${FFX_RUNTIME_RELATIVE_DIRECTORY}"
+##)

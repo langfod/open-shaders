@@ -140,11 +140,12 @@ stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STR
 stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
 stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
 
-register_feature_payload(
-    Upscaling
-    FILES ${STREAMLINE_RUNTIME_FILES}
-    DESTINATION "${STREAMLINE_RUNTIME_RELATIVE_DIRECTORY}"
-)
+# XXX Temporarily disabling copying dll files. XXX
+#register_feature_payload(
+#    Upscaling
+#    FILES ${STREAMLINE_RUNTIME_FILES}
+#    DESTINATION "${STREAMLINE_RUNTIME_RELATIVE_DIRECTORY}"
+#)
 
 # streamlineDX12 needs the same core plugins plus DLSS-G (frame generation).
 set(STREAMLINE_RUNTIME_DX12_FILES "")
@@ -157,8 +158,9 @@ stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}
 stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
 stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
 
-register_feature_payload(
-    Upscaling
-    FILES ${STREAMLINE_RUNTIME_DX12_FILES}
-    DESTINATION "${STREAMLINE_RUNTIME_DX12_RELATIVE_DIRECTORY}"
-)
+# XXX Temporarily disabling copying dll files for the DX12 runtime. XXX
+##register_feature_payload(
+##    Upscaling
+##    FILES ${STREAMLINE_RUNTIME_DX12_FILES}
+##    DESTINATION "${STREAMLINE_RUNTIME_DX12_RELATIVE_DIRECTORY}"
+##)
