@@ -181,7 +181,7 @@ namespace NeuralRendering
 				context->CopyResource(color[0]->resource.get(), framebuffer);
 			}
 
-			if (succeeded)
+			for (std::uint32_t pass = 0; succeeded && pass < upscaling.neuralRendering.passes; ++pass)
 				succeeded = Renderer::Instance().Apply(globals::d3d::device, context, 0,
 					color[0]->resource.get(), depth.texture, depth.depthSRV,
 					upscaling.motionVectorCopyTexture->resource.get(), motionDesc.Width, motionDesc.Height,
@@ -278,9 +278,11 @@ namespace NeuralRendering
 				.motionVectorScaleY = motionScaleY * FoveatedRenderImpl::Core::vrSubrectInH,
 			};
 		}
-		const bool succeeded = Renderer::Instance().ApplyStereo(globals::d3d::device, context,
-			total.texture, inputs, FoveatedRenderImpl::Core::vrSubrectInW, FoveatedRenderImpl::Core::vrSubrectInH,
-			outWidth, outHeight, GetTuning(upscaling.neuralRendering));
+		bool succeeded = true;
+		for (std::uint32_t pass = 0; succeeded && pass < upscaling.neuralRendering.passes; ++pass)
+			succeeded = Renderer::Instance().ApplyStereo(globals::d3d::device, context,
+				total.texture, inputs, FoveatedRenderImpl::Core::vrSubrectInW, FoveatedRenderImpl::Core::vrSubrectInH,
+				outWidth, outHeight, GetTuning(upscaling.neuralRendering));
 		if (succeeded) {
 			lastAppliedFrame = frame;
 			if (!writebackLogged) {

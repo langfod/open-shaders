@@ -69,7 +69,8 @@ namespace NeuralRendering
 		skinStructure,
 		style,
 		autoMask,
-		uiCorrection);
+		uiCorrection,
+		passes);
 }
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
@@ -107,6 +108,7 @@ void ClampNeuralRenderingSettings(NeuralRendering::Settings& a_settings)
 	a_settings.localStructure = std::clamp(a_settings.localStructure, 0.0f, 2.0f);
 	a_settings.skinStructure = std::clamp(a_settings.skinStructure, 0.0f, 2.0f);
 	a_settings.style = std::min(a_settings.style, 3u);
+	a_settings.passes = std::clamp(a_settings.passes, 1u, 6u);
 }
 
 /**
@@ -449,6 +451,10 @@ void Upscaling::DrawNeuralRenderingControls()
 		if (custom)
 			neuralRendering.preset = 0;
 
+		int passes = static_cast<int>(neuralRendering.passes);
+		if (ImGui::SliderInt(T(TKEY("neural_rendering_passes"), "Passes"), &passes, 1, 6))
+			neuralRendering.passes = static_cast<uint>(passes);
+
 		auto& neuralRenderer = NeuralRendering::Renderer::Instance();
 		if (neuralRenderer.IsFailureLatched()) {
 			Util::Text::Warning("DLSS Neural Rendering failed and is disabled for this session. Check CommunityShaders.log.");
@@ -658,7 +664,7 @@ void Upscaling::RegisterUxActions()
 			foveatedRender.subrectController.ApplyPresetByName(args.value("name", std::string{}));
 		});
 	FEATURE_QUERY("neuralRenderingStatus",
-		"DLSS Neural Rendering runtime state: whether the route is configured, the nvngx_dlssnr status and last NGX result code, evaluations completed this session, and whether a failure is latched (which disables the pass until reset). Use this to confirm the pass is actually running rather than silently skipped. Params: none.",
+		"DLSS Neural Rendering runtime state: whether the route is configured, the nvngx_dlssnr status and last NGX result code, evaluations completed this session, the configured feedback pass count, and whether a failure is latched (which disables the pass until reset). Use this to confirm the pass is actually running rather than silently skipped. Params: none.",
 		[](const Feature*, const json&) -> json {
 			const auto& renderer = NeuralRendering::Renderer::Instance();
 			const auto& runtime = NeuralRendering::Runtime::Instance();
@@ -671,6 +677,7 @@ void Upscaling::RegisterUxActions()
 			status["successfulFrames"] = renderer.SuccessfulFrames();
 			status["failureLatched"] = renderer.IsFailureLatched();
 			status["runtimeVersion"] = runtime.Version();
+			status["passes"] = globals::features::upscaling.neuralRendering.passes;
 			return status;
 		});
 	FEATURE_COMMAND("resetNeuralRendering",

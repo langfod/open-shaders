@@ -21,5 +21,6 @@ namespace NeuralRendering
 		std::uint32_t style = 3;
 		bool autoMask = true;
 		bool uiCorrection = false;
+		std::uint32_t passes = 1;  ///< Re-evaluates the pass on its own output this many times (1-6).
 	};
 }

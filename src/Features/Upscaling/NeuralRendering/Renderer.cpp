@@ -255,12 +255,15 @@ namespace NeuralRendering
 			if (SUCCEEDED(result)) result = dxgiDevice->GetAdapter(&adapter);
 			if (FAILED(result))
 				return LatchFailure("D3D12 interop adapter lookup", result);
-			// Both are null until the DLSS-G swapchain stands them up. Sharing the device
+			// All three are null until the DLSS-G swapchain stands them up. Sharing the device
 			// keeps neural rendering and frame generation on a single NGX session, and the
-			// captured immediate context predates any third-party context wrapper.
+			// captured D3D11 pair predates any third-party wrapper, so it can still carry a
+			// shared fence when the render device refuses one.
 			auto* frameGenerationDevice = Upscaling::dx12SwapChain.d3d12Device.get();
+			auto* frameGenerationD3D11Device = Upscaling::dx12SwapChain.d3d11Device.get();
 			auto* frameGenerationContext = Upscaling::dx12SwapChain.d3d11Context.get();
-			if (!interop.Initialize(adapter.Get(), device, context, frameGenerationDevice, frameGenerationContext))
+			if (!interop.Initialize(adapter.Get(), device, context, frameGenerationDevice,
+					frameGenerationD3D11Device, frameGenerationContext))
 				return LatchInteropFailure("D3D12 interop initialization");
 			return true;
 		}

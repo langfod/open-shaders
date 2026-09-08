@@ -92,13 +92,56 @@ namespace NeuralRendering
 		const D3D12_FENCE_FLAGS fenceFlags = gpuFenceSync_ ? D3D12_FENCE_FLAG_SHARED : D3D12_FENCE_FLAG_NONE;
 		result = device12_->CreateFence(0, fenceFlags, IID_PPV_ARGS(&fence12_));
 		if (FAILED(result)) return RecordFailure("CreateFence", result);
-		if (gpuFenceSync_) {
-			HANDLE sharedFence = nullptr;
-			result = device12_->CreateSharedHandle(fence12_.Get(), nullptr, GENERIC_ALL, nullptr, &sharedFence);
-			if (FAILED(result)) return RecordFailure("CreateSharedHandle(Fence)", result);
-			result = device11_->OpenSharedFence(sharedFence, IID_PPV_ARGS(&fence11_));
-			CloseHandle(sharedFence);
-			if (FAILED(result)) return RecordFailure("OpenSharedFence", result);
+		if (gpuFenceSync_ && !ShareFenceWithD3D11())
+			return DegradeToCpuSync();
+		lastError_ = S_OK;
+		return true;
+	}
+
+	bool D3D12Interop::ShareFenceWithD3D11()
+	{
+		HANDLE sharedFence = nullptr;
+		HRESULT result = device12_->CreateSharedHandle(fence12_.Get(), nullptr, GENERIC_ALL, nullptr, &sharedFence);
+		if (FAILED(result)) return RecordFailure("CreateSharedHandle(Fence)", result);
+		result = device5_ ? device5_->OpenSharedFence(sharedFence, IID_PPV_ARGS(&fence11_)) : E_NOINTERFACE;
+		if (FAILED(result) && AdoptProxyFenceDevice()) {
+			logger::info("[DLSSNR] render device refused the shared fence hr=0x{:08X}; using the frame-generation device",
+				static_cast<std::uint32_t>(result));
+			result = device5_->OpenSharedFence(sharedFence, IID_PPV_ARGS(&fence11_));
+		}
+		CloseHandle(sharedFence);
+		if (FAILED(result)) return RecordFailure("OpenSharedFence", result);
+		return true;
+	}
+
+	bool D3D12Interop::AdoptProxyFenceDevice()
+	{
+		if (!proxyDevice_ || !proxyContext_ || device5_.Get() == proxyDevice_.Get())
+			return false;
+		device5_ = proxyDevice_;
+		context11_ = proxyContext_;
+		return true;
+	}
+
+	bool D3D12Interop::DegradeToCpuSync()
+	{
+		logger::warn("[DLSSNR] D3D11 refused the shared fence op={} hr=0x{:08X}; synchronising on the CPU instead",
+			lastOperation_, static_cast<std::uint32_t>(lastError_));
+		gpuFenceSync_ = false;
+		fence11_.Reset();
+		fence12_.Reset();
+		const HRESULT result = device12_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence12_));
+		if (FAILED(result)) return RecordFailure("CreateFence(CpuSync)", result);
+		return EnsureFlushQuery();
+	}
+
+	bool D3D12Interop::EnsureFlushQuery()
+	{
+		if (!flushQuery_) {
+			const D3D11_QUERY_DESC queryDesc{ D3D11_QUERY_EVENT, 0 };
+			const HRESULT result = device11_->CreateQuery(&queryDesc, &flushQuery_);
+			if (FAILED(result)) return RecordFailure("CreateQuery(Event)", result);
+			Util::SetResourceName(flushQuery_.Get(), "NeuralRendering::FlushQuery");
 		}
 		lastError_ = S_OK;
 		return true;
@@ -114,24 +157,28 @@ namespace NeuralRendering
 	}
 
 	bool D3D12Interop::Initialize(IDXGIAdapter* adapter, ID3D11Device* device, ID3D11DeviceContext* context,
-		ID3D12Device* existingDevice, ID3D11DeviceContext4* proxyContext)
+		ID3D12Device* existingDevice, ID3D11Device5* proxyDevice, ID3D11DeviceContext4* proxyContext)
 	{
 		Shutdown();
 		if (!adapter || !device || !context)
 			return RecordFailure("InitializeArguments", E_INVALIDARG);
 
-		HRESULT result = device->QueryInterface(IID_PPV_ARGS(&device11_));
-		if (FAILED(result)) return RecordFailure("QueryInterface(ID3D11Device5)", result);
+		device11_ = device;
 		contextBase_ = context;
+		proxyDevice_ = proxyDevice;
+		proxyContext_ = proxyContext;
+		// A wrapper can stop below ID3D11Device5 while still forwarding everything else
+		// untouched. Only the shared fence needs it, and the frame-generation pair can
+		// stand in, so a miss here is not yet fatal to the GPU-side wait.
+		HRESULT result = device->QueryInterface(IID_PPV_ARGS(&device5_));
+		if (FAILED(result))
+			logger::warn("[DLSSNR] render device lacks ID3D11Device5 hr=0x{:08X} proxyDevice={}",
+				static_cast<std::uint32_t>(result), proxyDevice != nullptr);
 		result = context->QueryInterface(IID_PPV_ARGS(&context11_));
 		if (FAILED(result) && !AdoptFenceContext(device, context, proxyContext, result))
 			return RecordFailure("QueryInterface(ID3D11DeviceContext4)", result);
-		if (!gpuFenceSync_) {
-			const D3D11_QUERY_DESC queryDesc{ D3D11_QUERY_EVENT, 0 };
-			result = device11_->CreateQuery(&queryDesc, &flushQuery_);
-			if (FAILED(result)) return RecordFailure("CreateQuery(Event)", result);
-			Util::SetResourceName(flushQuery_.Get(), "NeuralRendering::FlushQuery");
-		}
+		if (!gpuFenceSync_ && !EnsureFlushQuery())
+			return false;
 
 		// NGX keys its session off the D3D12 device, use existing instead of makinga new one that may break the session
 		bool sharedDevice = false;
@@ -177,6 +224,9 @@ namespace NeuralRendering
 		flushQuery_.Reset();
 		context11_.Reset();
 		contextBase_.Reset();
+		proxyContext_.Reset();
+		proxyDevice_.Reset();
+		device5_.Reset();
 		device11_.Reset();
 	}
 
