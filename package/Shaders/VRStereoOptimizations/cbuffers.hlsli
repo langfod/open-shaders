@@ -12,16 +12,20 @@ cbuffer VRStereoOptParams : register(b1)
 	uint StereoModeValue;         // 0=Off, 1=Enable
 	float DisocclusionThreshold;  // Depth difference threshold for disocclusion detection
 	float EdgeDepthThreshold;     // Relative depth difference threshold for edge detection
-	uint _pad0;
+	uint RepairFromEye0Depth;     // 1 = culled Eye 1 pixels take Eye 0's warped final depth when nearer than the prepass depth
 
-	float2 _pad1;
-	float FoveatedRadius;         // reserved for foveated reprojection — see alandtse/open-shaders#143
-	float ForwardOcclusionScale;  // Eye 0 depth multiplier for directional disocclusion (0 = disabled)
+	uint DepthHistoryValid;           // 1 = DepthHistory holds the previous frame's final depth
+	uint UseUnrepairableMask;         // 1 = Eye 1 reads the unrepairable-strip feedback mask
+	float FoveatedRadius;             // reserved for foveated reprojection — see alandtse/open-shaders#143
+	float DirectionalOcclusionRatio;  // Eye 0 must be closer than this fraction of Eye 1's depth (0 = disabled)
 
 	float2 FoveatedCenter;  // reserved for foveated reprojection — see alandtse/open-shaders#143
 	float MinEdgeDistance;
 	float FullBlendDistance;  // Linearized depth below which pixels get MODE_FULL_BLEND (game units)
 };
+
+#define DEPTH_UNRENDERED 1.0             // depth clear value: nothing was rasterised at the pixel
+#define SCATTER_DEPTH_EMPTY 0xFFFFFFFFu  // ScatterDepth texel no Eye 0 texel landed on; must match kScatterDepthEmpty
 
 #define STEREO_MODE_OFF 0
 #define STEREO_MODE_ENABLE 1
