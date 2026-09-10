@@ -146,6 +146,10 @@ namespace NeuralRendering
 				return false;
 			}
 			flatRouteWasActive = true;
+			// preUpscale already ran the pass in Upscale(), before this frame's DLSS
+			// upscale call consumed kMAIN; running it again here would double-apply.
+			if (upscaling.neuralRendering.preUpscale)
+				return true;
 
 			const std::uint32_t frame = globals::state ? globals::state->frameCount : 0;
 			if (lastAppliedFrame == frame)
@@ -214,6 +218,85 @@ namespace NeuralRendering
 			if (savedDSV) savedDSV->Release();
 			return succeeded;
 		}
+
+		/// <summary>The preUpscale counterpart of ApplyFlatLdr: same guide/tuning inputs, but
+		/// runs on the render-resolution kMAIN buffer before Upscale() reads it as DLSS's
+		/// colorIn, instead of on the display-resolution post-tonemap kFRAMEBUFFER. Flat only --
+		/// VR's post-upscale route has its own per-eye subrect handling this mirrors.</summary>
+		bool ApplyPreUpscaleFlat(Upscaling& upscaling)
+		{
+			if (globals::game::isVR || upscaling.GetUpscaleMethod() != Upscaling::UpscaleMethod::kDLSS ||
+				!upscaling.neuralRendering.enabled || !upscaling.neuralRendering.preUpscale)
+				return false;
+
+			auto* renderer = globals::game::renderer;
+			auto* context = globals::d3d::context;
+			if (!renderer || !context || !globals::d3d::device || !upscaling.motionVectorCopyTexture)
+				return false;
+
+			auto& main = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+			auto& depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
+			if (!main.texture || !depth.texture || !depth.depthSRV || !upscaling.motionVectorCopyTexture->resource)
+				return false;
+
+			D3D11_TEXTURE2D_DESC mainDesc{};
+			D3D11_TEXTURE2D_DESC motionDesc{};
+			main.texture->GetDesc(&mainDesc);
+			upscaling.motionVectorCopyTexture->resource->GetDesc(&motionDesc);
+			if (!EnsureColorResources(main.texture, mainDesc.Width, mainDesc.Height))
+				return false;
+
+			CS_GPU_PASS("NeuralRendering::PreUpscale");
+			ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+			ID3D11DepthStencilView* savedDSV = nullptr;
+			context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+			context->OMSetRenderTargets(0, nullptr, nullptr);
+
+			const bool rangeMapped = colorWork != nullptr;
+			bool succeeded = true;
+			if (rangeMapped) {
+				context->CopyResource(colorWork->resource.get(), main.texture);
+				succeeded = DispatchHdrRangeMap(context, false, colorWork->srv.get(), color[0]->uav.get(),
+					mainDesc.Width, mainDesc.Height);
+			} else {
+				context->CopyResource(color[0]->resource.get(), main.texture);
+			}
+
+			for (std::uint32_t pass = 0; succeeded && pass < upscaling.neuralRendering.passes; ++pass)
+				succeeded = Renderer::Instance().Apply(globals::d3d::device, context, 0,
+					color[0]->resource.get(), depth.texture, depth.depthSRV,
+					upscaling.motionVectorCopyTexture->resource.get(), motionDesc.Width, motionDesc.Height,
+					mainDesc.Width, mainDesc.Height, static_cast<float>(motionDesc.Width),
+					static_cast<float>(motionDesc.Height), GetTuning(upscaling.neuralRendering));
+
+			if (succeeded) {
+				if (rangeMapped) {
+					succeeded = DispatchHdrRangeMap(context, true, color[0]->srv.get(), colorWork->uav.get(),
+						mainDesc.Width, mainDesc.Height);
+					if (succeeded)
+						context->CopyResource(main.texture, colorWork->resource.get());
+				} else {
+					context->CopyResource(main.texture, color[0]->resource.get());
+				}
+			}
+
+			if (succeeded && !writebackLogged) {
+				logger::info("[DLSSNR] Pre-upscale kMAIN written before DLSS upscale guides={}x{} color={}x{} rangeMapped={}",
+					motionDesc.Width, motionDesc.Height, mainDesc.Width, mainDesc.Height, rangeMapped);
+				writebackLogged = true;
+			}
+
+			context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+			for (auto*& rtv : savedRTVs)
+				if (rtv) rtv->Release();
+			if (savedDSV) savedDSV->Release();
+			return succeeded;
+		}
+	}
+
+	bool ApplyBeforeUpscale()
+	{
+		return ApplyPreUpscaleFlat(globals::features::upscaling);
 	}
 
 	bool ApplyBeforeUI()

@@ -70,7 +70,8 @@ namespace NeuralRendering
 		style,
 		autoMask,
 		uiCorrection,
-		passes);
+		passes,
+		preUpscale);
 }
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
@@ -455,6 +456,13 @@ void Upscaling::DrawNeuralRenderingControls()
 		if (ImGui::SliderInt(T(TKEY("neural_rendering_passes"), "Passes"), &passes, 1, 6))
 			neuralRendering.passes = static_cast<uint>(passes);
 
+		if (!globals::game::isVR) {
+			ImGui::Checkbox(T(TKEY("neural_rendering_pre_upscale"), "Run Before Upscaling"), &neuralRendering.preUpscale);
+			Util::AddTooltip(T(TKEY("neural_rendering_pre_upscale_tooltip"),
+				"Experimental: processes the render-resolution scene before DLSS upscales it, instead of the "
+				"final display-resolution frame. Cheaper per pass but feeds the model a smaller, pre-tonemap image."));
+		}
+
 		auto& neuralRenderer = NeuralRendering::Renderer::Instance();
 		if (neuralRenderer.IsFailureLatched()) {
 			Util::Text::Warning("DLSS Neural Rendering failed and is disabled for this session. Check CommunityShaders.log.");
@@ -664,7 +672,7 @@ void Upscaling::RegisterUxActions()
 			foveatedRender.subrectController.ApplyPresetByName(args.value("name", std::string{}));
 		});
 	FEATURE_QUERY("neuralRenderingStatus",
-		"DLSS Neural Rendering runtime state: whether the route is configured, the nvngx_dlssnr status and last NGX result code, evaluations completed this session, the configured feedback pass count, and whether a failure is latched (which disables the pass until reset). Use this to confirm the pass is actually running rather than silently skipped. Params: none.",
+		"DLSS Neural Rendering runtime state: whether the route is configured, the nvngx_dlssnr status and last NGX result code, evaluations completed this session, the configured feedback pass count, whether it runs before DLSS upscaling instead of after (flat only), and whether a failure is latched (which disables the pass until reset). Use this to confirm the pass is actually running rather than silently skipped. Params: none.",
 		[](const Feature*, const json&) -> json {
 			const auto& renderer = NeuralRendering::Renderer::Instance();
 			const auto& runtime = NeuralRendering::Runtime::Instance();
@@ -678,6 +686,7 @@ void Upscaling::RegisterUxActions()
 			status["failureLatched"] = renderer.IsFailureLatched();
 			status["runtimeVersion"] = runtime.Version();
 			status["passes"] = globals::features::upscaling.neuralRendering.passes;
+			status["preUpscale"] = globals::features::upscaling.neuralRendering.preUpscale;
 			return status;
 		});
 	FEATURE_COMMAND("resetNeuralRendering",
@@ -2929,6 +2938,8 @@ void Upscaling::Upscale()
 				logger::debug("[Upscaling] LoadingMenu close detected — rebuilding DLSS feature");
 				streamline.DestroyDLSSResources();
 			}
+
+			NeuralRendering::ApplyBeforeUpscale();
 
 			const bool routeHandled = tryFoveatedRoute(
 				globals::game::renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].texture, "DLSS");
