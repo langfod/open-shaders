@@ -28,15 +28,21 @@ file(MAKE_DIRECTORY "${STREAMLINE_RUNTIME_ROOT}")
 file(MAKE_DIRECTORY "${STREAMLINE_RUNTIME_DIRECTORY}")
 file(MAKE_DIRECTORY "${STREAMLINE_RUNTIME_DX12_DIRECTORY}")
 
-file(
-    DOWNLOAD "${STREAMLINE_RUNTIME_ARCHIVE_URL}"
-    "${STREAMLINE_RUNTIME_ARCHIVE}"
-    EXPECTED_HASH "SHA256=${STREAMLINE_RUNTIME_ARCHIVE_SHA256}"
-    STATUS _streamline_download_status
-    TLS_VERIFY ON
-    TIMEOUT 600
-    INACTIVITY_TIMEOUT 60
-)
+set(_streamline_download_status 0 "cached")
+if(EXISTS "${STREAMLINE_RUNTIME_ARCHIVE}")
+    file(SHA256 "${STREAMLINE_RUNTIME_ARCHIVE}" _streamline_existing_sha256)
+endif()
+if(NOT _streamline_existing_sha256 STREQUAL "${STREAMLINE_RUNTIME_ARCHIVE_SHA256}")
+    file(
+        DOWNLOAD "${STREAMLINE_RUNTIME_ARCHIVE_URL}"
+        "${STREAMLINE_RUNTIME_ARCHIVE}"
+        EXPECTED_HASH "SHA256=${STREAMLINE_RUNTIME_ARCHIVE_SHA256}"
+        STATUS _streamline_download_status
+        TLS_VERIFY ON
+        TIMEOUT 600
+        INACTIVITY_TIMEOUT 60
+    )
+endif()
 list(GET _streamline_download_status 0 _streamline_download_code)
 list(GET _streamline_download_status 1 _streamline_download_message)
 if(NOT _streamline_download_code EQUAL 0)
@@ -126,33 +132,39 @@ function(stage_streamline_runtime _filename _directory _out_var)
     )
 endfunction()
 
-set(STREAMLINE_RUNTIME_FILES "")
-stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
-stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
 
-register_feature_payload(
-    Upscaling
-    FILES ${STREAMLINE_RUNTIME_FILES}
-    DESTINATION "${STREAMLINE_RUNTIME_RELATIVE_DIRECTORY}"
-)
+
+# XXX Temporarily disabling copying dll files for the DX12 runtime. XXX
+
+set(STREAMLINE_RUNTIME_FILES "")
+#stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+#stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DIRECTORY}" STREAMLINE_RUNTIME_FILES)
+
+# XXX Temporarily disabling copying dll files. XXX
+#register_feature_payload(
+#    Upscaling
+#    FILES ${STREAMLINE_RUNTIME_FILES}
+#    DESTINATION "${STREAMLINE_RUNTIME_RELATIVE_DIRECTORY}"
+#)
 
 # streamlineDX12 needs the same core plugins plus DLSS-G (frame generation).
 set(STREAMLINE_RUNTIME_DX12_FILES "")
-stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(nvngx_dlssg.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.dlss_g.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
-stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(nvngx_dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(nvngx_dlssg.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.common.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.dlss.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.dlss_g.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.interposer.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.pcl.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
+#stage_streamline_runtime(sl.reflex.dll "${STREAMLINE_RUNTIME_DX12_DIRECTORY}" STREAMLINE_RUNTIME_DX12_FILES)
 
-register_feature_payload(
-    Upscaling
-    FILES ${STREAMLINE_RUNTIME_DX12_FILES}
-    DESTINATION "${STREAMLINE_RUNTIME_DX12_RELATIVE_DIRECTORY}"
-)
+
+##register_feature_payload(
+##    Upscaling
+##    FILES ${STREAMLINE_RUNTIME_DX12_FILES}
+##    DESTINATION "${STREAMLINE_RUNTIME_DX12_RELATIVE_DIRECTORY}"
+##)

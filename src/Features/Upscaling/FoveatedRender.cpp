@@ -7,6 +7,7 @@
 #include "../FoveatedCommon.h"
 #include "../Upscaling.h"
 #include "FoveatedRender/Core.h"
+#include "NeuralRendering/Integration.h"
 
 #include <algorithm>
 
@@ -57,11 +58,19 @@ void FoveatedRender::PostPostLoad()
 	// current preset in the DrawEditor dropdown, not just whichever ones they
 	// happened to click as buttons.
 	subrectController.MaterializeNewDefaults();
+	stl::write_vfunc<0x1, UICompositeRenderHook>(RE::VTABLE_BSImagespaceShaderCopyDynamicFetchDisabled[3]);
+}
+
+void FoveatedRender::UICompositeRenderHook::thunk(void* imageSpaceShader, RE::BSTriShape* shape, RE::ImageSpaceEffectParam* param)
+{
+	NeuralRendering::ApplyBeforeUI();
+	func(imageSpaceShader, shape, param);
 }
 
 void FoveatedRender::ClearShaderCache()
 {
 	FoveatedRenderImpl::Core::ClearShaderCache();
+	FoveatedRenderImpl::Core::ClearResources();
 }
 
 // ============================================================================
@@ -324,7 +333,8 @@ void FoveatedRender::DrawSettings()
 {
 	ClampSettings();
 
-	Util::Text::WrappedInfo(T(TKEY("foveated_shared_panel_note"), "Quality and Sharpness are on the main Upscaling panel — changes there apply to foveated rendering too. DLSS Preset also applies there when DLSS is the selected upscaler."));
+	if (globals::game::isVR)
+		Util::Text::WrappedInfo(T(TKEY("foveated_shared_panel_note"), "Quality and Sharpness are on the main Upscaling panel — changes there apply to foveated rendering too. DLSS Preset also applies there when DLSS is the selected upscaler."));
 
 	// ── VR-only knobs ──
 	if (globals::game::isVR) {

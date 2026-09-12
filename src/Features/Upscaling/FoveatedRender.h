@@ -118,6 +118,12 @@ struct FoveatedRender
 	// Called from Upscaling::PostPostLoad to seed subrect presets.
 	void PostPostLoad();
 
+	struct UICompositeRenderHook
+	{
+		static void thunk(void* imageSpaceShader, RE::BSTriShape* shape, RE::ImageSpaceEffectParam* param);
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
 	bool IsRuntimeSupported() const;
 	bool IsActive() const;
 	bool IsLoaded() const { return enabledAtBoot; }

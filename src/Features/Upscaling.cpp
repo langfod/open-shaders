@@ -13,6 +13,8 @@
 #include "Upscaling/FoveatedRender/Core.h"
 #include "Upscaling/FoveatedRender/Postprocess.h"
 #include "Upscaling/FoveatedRender/Preprocess.h"
+#include "Upscaling/NeuralRendering/Integration.h"
+#include "Upscaling/NeuralRendering/Renderer.h"
 #include "Upscaling/PerfMode.h"
 #include "Upscaling/Streamline.h"
 #include "Utils/DevBenchUx.h"
@@ -55,6 +57,23 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	fsr4RuntimeEnable,
 	fsr4RuntimeSelectionSchemaVersion);
 
+namespace NeuralRendering
+{
+	NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+		Settings,
+		enabled,
+		preset,
+		intensity,
+		localTone,
+		localStructure,
+		skinStructure,
+		style,
+		autoMask,
+		uiCorrection,
+		passes,
+		preUpscale);
+}
+
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChainUpscaling;
 
 /**
@@ -80,6 +99,44 @@ void ApplyLegacyFsr4RuntimeSelectionMigration(Upscaling::Settings& a_settings, F
 	}
 
 	a_settings.fsr4RuntimeSelectionSchemaVersion = Upscaling::kFsr4RuntimeSelectionSchemaVersion;
+}
+
+void ClampNeuralRenderingSettings(NeuralRendering::Settings& a_settings)
+{
+	a_settings.preset = std::min(a_settings.preset, 4u);
+	a_settings.intensity = std::clamp(a_settings.intensity, 0.0f, 2.0f);
+	a_settings.localTone = std::clamp(a_settings.localTone, 0.0f, 2.0f);
+	a_settings.localStructure = std::clamp(a_settings.localStructure, 0.0f, 2.0f);
+	a_settings.skinStructure = std::clamp(a_settings.skinStructure, 0.0f, 2.0f);
+	a_settings.style = std::min(a_settings.style, 3u);
+	a_settings.passes = std::clamp(a_settings.passes, 1u, 6u);
+}
+
+/**
+ * @brief Lifts Neural Rendering tuning out of the legacy foveatedRender block.
+ *
+ * These fields were introduced on FoveatedRender while the work was VR-only, so configs
+ * written before the move carry them there. 
+ */
+void MigrateLegacyNeuralRenderingSettings(const json& a_foveatedRender, NeuralRendering::Settings& a_settings)
+{
+	if (!a_foveatedRender.is_object() || !a_foveatedRender.contains("neuralRenderingEnabled"))
+		return;
+
+	auto read = [&](const char* a_key, auto& a_field) {
+		if (auto found = a_foveatedRender.find(a_key); found != a_foveatedRender.end())
+			a_field = found->get<std::remove_reference_t<decltype(a_field)>>();
+	};
+	read("neuralRenderingEnabled", a_settings.enabled);
+	read("neuralRenderingPreset", a_settings.preset);
+	read("neuralRenderingIntensity", a_settings.intensity);
+	read("neuralRenderingLocalTone", a_settings.localTone);
+	read("neuralRenderingLocalStructure", a_settings.localStructure);
+	read("neuralRenderingSkinStructure", a_settings.skinStructure);
+	read("neuralRenderingStyle", a_settings.style);
+	read("neuralRenderingAutoMask", a_settings.autoMask);
+	read("neuralRenderingUICorrection", a_settings.uiCorrection);
+	logger::info("[Upscaling] Migrated Neural Rendering settings out of the foveatedRender block");
 }
 
 /**
@@ -351,6 +408,77 @@ void Upscaling::DrawFoveationControls(bool showTuning)
 		ImGui::EndDisabled();
 }
 
+void Upscaling::DrawNeuralRenderingControls()
+{
+	if (!ImGui::CollapsingHeader(T(TKEY("neural_rendering_header"), "DLSS Neural Rendering"), ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+
+	const bool supportedRoute = GetUpscaleMethod() == UpscaleMethod::kDLSS &&
+		(!globals::game::isVR || (foveatedRender.GetDlssMode() == FoveatedRender::DlssMode::kDefault &&
+			perfMode.IsHookActive()));
+	if (!supportedRoute) {
+		Util::Text::Warning(T(TKEY("neural_rendering_unavailable"),
+			"Requires DLSS. VR additionally requires Foveated Default mode and active PerfMode."));
+		ImGui::BeginDisabled();
+	}
+	ImGui::Checkbox(T(TKEY("neural_rendering_enable"), "Enable DLSS Neural Rendering"), &neuralRendering.enabled);
+
+	if (neuralRendering.enabled) {
+		static const char* presets[] = { "Custom", "Balanced", "Fabric Detail", "Natural", "Strong" };
+		int preset = static_cast<int>(neuralRendering.preset);
+		if (ImGui::Combo(T(TKEY("neural_rendering_preset"), "Tuning Preset"), &preset, presets, IM_ARRAYSIZE(presets))) {
+			neuralRendering.preset = static_cast<uint>(preset);
+			switch (neuralRendering.preset) {
+			case 1: neuralRendering.intensity = 1.0f; neuralRendering.localTone = 1.0f; neuralRendering.localStructure = 1.0f; neuralRendering.skinStructure = 1.0f; break;
+			case 2: neuralRendering.intensity = 1.35f; neuralRendering.localTone = 0.9f; neuralRendering.localStructure = 1.6f; neuralRendering.skinStructure = 1.15f; break;
+			case 3: neuralRendering.intensity = 0.8f; neuralRendering.localTone = 0.75f; neuralRendering.localStructure = 0.9f; neuralRendering.skinStructure = 0.9f; break;
+			case 4: neuralRendering.intensity = 1.75f; neuralRendering.localTone = 1.25f; neuralRendering.localStructure = 1.5f; neuralRendering.skinStructure = 1.3f; break;
+			default: break;
+			}
+		}
+		bool custom = false;
+		custom |= ImGui::SliderFloat(T(TKEY("neural_rendering_intensity"), "Intensity"), &neuralRendering.intensity, 0.0f, 2.0f, "%.2f");
+		custom |= ImGui::SliderFloat(T(TKEY("neural_rendering_local_tone"), "Local Tone"), &neuralRendering.localTone, 0.0f, 2.0f, "%.2f");
+		custom |= ImGui::SliderFloat(T(TKEY("neural_rendering_local_structure"), "Local Structure"), &neuralRendering.localStructure, 0.0f, 2.0f, "%.2f");
+		custom |= ImGui::SliderFloat(T(TKEY("neural_rendering_skin_structure"), "Skin Structure"), &neuralRendering.skinStructure, 0.0f, 2.0f, "%.2f");
+		static const char* styles[] = { "Style 0", "Style 1", "Style 2", "Style 3" };
+		int style = static_cast<int>(neuralRendering.style);
+		if (ImGui::Combo(T(TKEY("neural_rendering_style"), "Style"), &style, styles, IM_ARRAYSIZE(styles))) {
+			neuralRendering.style = static_cast<uint>(style);
+			custom = true;
+		}
+		custom |= ImGui::Checkbox(T(TKEY("neural_rendering_auto_mask"), "Automatic Mask"), &neuralRendering.autoMask);
+		custom |= ImGui::Checkbox(T(TKEY("neural_rendering_ui_correction"), "UI Correction"), &neuralRendering.uiCorrection);
+		if (custom)
+			neuralRendering.preset = 0;
+
+		int passes = static_cast<int>(neuralRendering.passes);
+		if (ImGui::SliderInt(T(TKEY("neural_rendering_passes"), "Passes"), &passes, 1, 6))
+			neuralRendering.passes = static_cast<uint>(passes);
+
+		if (!globals::game::isVR) {
+			ImGui::Checkbox(T(TKEY("neural_rendering_pre_upscale"), "Run Before Upscaling"), &neuralRendering.preUpscale);
+			Util::AddTooltip(T(TKEY("neural_rendering_pre_upscale_tooltip"),
+				"Experimental: processes the render-resolution scene before DLSS upscales it, instead of the "
+				"final display-resolution frame. Cheaper per pass but feeds the model a smaller, pre-tonemap image."));
+		}
+
+		auto& neuralRenderer = NeuralRendering::Renderer::Instance();
+		if (neuralRenderer.IsFailureLatched()) {
+			Util::Text::Warning("DLSS Neural Rendering failed and is disabled for this session. Check CommunityShaders.log.");
+			if (ImGui::Button("Reset Neural Rendering Failure"))
+				neuralRenderer.Reset();
+		}
+		if (globals::state && globals::state->IsDeveloperMode()) {
+			ImGui::TextDisabled("Status: %s | NGX: 0x%08X | Evaluations: %llu",
+				neuralRenderer.StatusText(), neuralRenderer.NgxResult(),
+				static_cast<unsigned long long>(neuralRenderer.SuccessfulFrames()));
+		}
+	}
+	if (!supportedRoute)
+		ImGui::EndDisabled();
+}
+
 // Narrower than the feature name: the hub section only covers the VR perf knobs.
 std::string Upscaling::GetPerformanceSectionLabel()
 {
@@ -542,6 +670,29 @@ void Upscaling::RegisterUxActions()
 		"Apply a named foveation crop preset (see openshaders.feature get shortName=Upscaling -> foveatedRender.CropPresets[].name, e.g. \"Center 75%\") -- the same code path as clicking the preset dropdown, including right-eye auto-mirror. Params: name (string).",
 		[](Feature*, const json& args) {
 			foveatedRender.subrectController.ApplyPresetByName(args.value("name", std::string{}));
+		});
+	FEATURE_QUERY("neuralRenderingStatus",
+		"DLSS Neural Rendering runtime state: whether the route is configured, the nvngx_dlssnr status and last NGX result code, evaluations completed this session, the configured feedback pass count, whether it runs before DLSS upscaling instead of after (flat only), and whether a failure is latched (which disables the pass until reset). Use this to confirm the pass is actually running rather than silently skipped. Params: none.",
+		[](const Feature*, const json&) -> json {
+			const auto& renderer = NeuralRendering::Renderer::Instance();
+			const auto& runtime = NeuralRendering::Runtime::Instance();
+			// Assigned field by field: a brace-init list's commas would split the
+			// enclosing FEATURE_QUERY macro invocation into extra arguments.
+			json status;
+			status["enabled"] = globals::features::upscaling.neuralRendering.enabled;
+			status["status"] = renderer.StatusText();
+			status["ngxResult"] = std::format("0x{:08X}", renderer.NgxResult());
+			status["successfulFrames"] = renderer.SuccessfulFrames();
+			status["failureLatched"] = renderer.IsFailureLatched();
+			status["runtimeVersion"] = runtime.Version();
+			status["passes"] = globals::features::upscaling.neuralRendering.passes;
+			status["preUpscale"] = globals::features::upscaling.neuralRendering.preUpscale;
+			return status;
+		});
+	FEATURE_COMMAND("resetNeuralRendering",
+		"Tear down and re-arm DLSS Neural Rendering, clearing a latched failure -- the same code path as the \"Reset Neural Rendering Failure\" button. Releases the NGX feature and shared D3D12 resources; they are rebuilt on the next frame that needs them. Params: none.",
+		[](Feature*, const json&) {
+			NeuralRendering::Reset();
 		});
 }
 
@@ -900,6 +1051,8 @@ void Upscaling::DrawSettings()
 	if (globals::game::isVR)
 		DrawFoveationControls();
 
+	DrawNeuralRenderingControls();
+
 	if (ImGui::TreeNodeEx(T(TKEY("backend_diagnostics"), "Backend Diagnostics"))) {
 		// Streamline log level selection
 		const char* logLevels[] = {
@@ -1094,6 +1247,7 @@ void Upscaling::SaveSettings(json& o_json)
 	json foveatedRenderJson;
 	foveatedRender.SaveSettings(foveatedRenderJson);
 	o_json["foveatedRender"] = foveatedRenderJson;
+	o_json["neuralRendering"] = neuralRendering;
 	auto iniSettingCollection = globals::game::iniPrefSettingCollection;
 	if (iniSettingCollection) {
 		auto setting = iniSettingCollection->GetSetting("bUseTAA:Display");
@@ -1110,6 +1264,15 @@ void Upscaling::LoadSettings(json& o_json)
 	// presetDLSS (cross-feature compat), so re-run it after `settings = o_json`
 	// below — otherwise the JSON re-assign overwrites the clamp and an
 	// incompatible preset slips through.
+	// Neural Rendering settings used to live inside the foveatedRender block. 
+	// migrate if needed 
+	if (!o_json.contains("neuralRendering") && o_json.contains("foveatedRender"))
+		MigrateLegacyNeuralRenderingSettings(o_json["foveatedRender"], neuralRendering);
+	else if (o_json.contains("neuralRendering"))
+		neuralRendering = o_json["neuralRendering"];
+	o_json.erase("neuralRendering");
+	ClampNeuralRenderingSettings(neuralRendering);
+
 	if (o_json.contains("foveatedRender")) {
 		foveatedRender.LoadSettings(o_json["foveatedRender"]);
 		o_json.erase("foveatedRender");
@@ -2776,6 +2939,8 @@ void Upscaling::Upscale()
 				streamline.DestroyDLSSResources();
 			}
 
+			NeuralRendering::ApplyBeforeUpscale();
+
 			const bool routeHandled = tryFoveatedRoute(
 				globals::game::renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].texture, "DLSS");
 			if (!routeHandled) {
@@ -3251,6 +3416,14 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	} else {
 		func(a_this, a3, a_target, a_4, a_5);
 	}
+
+	// Flat's final tonemapped scene uses the surface kFRAMEBUFFER points
+	// at when the engine Post chain returns 
+	// hdrTexture for the HDR redirect
+	// vanilla framebuffer otherwise
+	// DLSSNR must run before the restore and before DrawInterfaceStart adds UI.
+	if (!globals::game::isVR)
+		NeuralRendering::ApplyBeforeUI();
 
 	// Restore kFRAMEBUFFER after ISHDR — hdrTexture now has the HDR scene
 	if (hdrLoaded)
